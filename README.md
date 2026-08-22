@@ -146,7 +146,7 @@ We will implement our first client/server application which is an **Echo server*
 After the client establishes a connection, it sends one or more messages to the server, which in turn echoes each
 message to the client.
 
-**Writing the Echo server**
+**_Writing the Echo server_**
 
 All Netty servers require the following:
 
@@ -178,5 +178,5 @@ Key points:
 - Architecturally, `ChannelHandlers` help to keep our business logic decoupled from networking code. This simplifies
   development as the code evolves in response to changing requirements.
 
-**Bootstrapping the server**
+**_Bootstrapping the server_**
 
