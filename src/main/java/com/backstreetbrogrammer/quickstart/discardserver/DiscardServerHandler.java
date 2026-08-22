@@ -8,9 +8,9 @@ import io.netty.util.ReferenceCountUtil;
 public class DiscardServerHandler extends ChannelInboundHandlerAdapter {
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) {
+    public void channelRead(final ChannelHandlerContext ctx, final Object msg) {
         //((ByteBuf) msg).release();
-        ByteBuf in = (ByteBuf) msg;
+        final ByteBuf in = (ByteBuf) msg;
         try {
             while (in.isReadable()) {
                 System.out.print((char) in.readByte());
@@ -22,7 +22,7 @@ public class DiscardServerHandler extends ChannelInboundHandlerAdapter {
     }
 
     @Override
-    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+    public void exceptionCaught(final ChannelHandlerContext ctx, final Throwable cause) {
         cause.printStackTrace();
         ctx.close();
     }
