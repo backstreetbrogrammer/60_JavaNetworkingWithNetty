@@ -25,7 +25,7 @@ Netty is an advanced framework for creating high-performance network application
 
 **Netty's Core Components**
 
-**_Channels_**
+**_1. Channels_**
 
 A Channel represents an open connection to an entity such as a hardware device, a file, a network socket, or a program
 component that is capable of performing one or more distinct I/O operations, for example reading or writing.
@@ -34,7 +34,7 @@ Think of a Channel as a vehicle for incoming (inbound) and outgoing (outbound) d
 
 It can be open or closed, connected or disconnected.
 
-**_Callbacks_**
+**_2. Callbacks_**
 
 A Callback is a function that is passed as an argument to another function and is intended to be executed after some
 operation has been completed.
@@ -44,7 +44,7 @@ exception.
 
 When a callback is triggered, the event can be handled by an implementation of the interface `ChannelHandler`.
 
-**_Futures_**
+**_3. Futures_**
 
 A Future represents the result of an asynchronous operation.
 
@@ -66,7 +66,7 @@ operation completion.
 
 Each of Netty’s outbound I/O operations returns a `ChannelFuture`; that is, none of them block.
 
-**_Events and handlers_**
+**_4. Events and handlers_**
 
 Netty uses distinct events to notify us about changes of state or the status of operations.
 
