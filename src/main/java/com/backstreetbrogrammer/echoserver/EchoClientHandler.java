@@ -16,7 +16,7 @@ public class EchoClientHandler extends SimpleChannelInboundHandler<ByteBuf> {
 
     @Override
     public void channelRead0(final ChannelHandlerContext ctx, final ByteBuf in) {
-        System.out.println("Echo from server: " + in.toString(CharsetUtil.UTF_8));
+        System.out.printf("Echo from server: %s%n", in.toString(CharsetUtil.UTF_8));
     }
 
     @Override

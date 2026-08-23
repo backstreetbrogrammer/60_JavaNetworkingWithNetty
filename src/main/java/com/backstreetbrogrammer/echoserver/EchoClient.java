@@ -33,8 +33,7 @@ public class EchoClient {
              // adds an EchoClientHandler to the pipeline when a Channel is created
              .handler(new ChannelInitializer<SocketChannel>() {
                  @Override
-                 public void initChannel(final SocketChannel ch)
-                         throws Exception {
+                 public void initChannel(final SocketChannel ch) {
                      ch.pipeline().addLast(
                              new EchoClientHandler());
                  }
@@ -53,9 +52,9 @@ public class EchoClient {
     }
 
     private void readAndSendMessages(final Channel channel) {
-        try (Scanner scanner = new Scanner(System.in)) {
+        try (final Scanner scanner = new Scanner(System.in)) {
             while (channel.isActive()) {
-                String message = scanner.nextLine();
+                final String message = scanner.nextLine();
                 
                 if (message.equalsIgnoreCase("quit") || message.equalsIgnoreCase("exit")) {
                     channel.close();
