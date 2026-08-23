@@ -272,7 +272,7 @@ network transport.
 
 In Java-based networking, the fundamental construct is class `Socket`.
 
-Netty’s `Channel` interface provides an API that greatly reduces the complexity of working directly with `Sockets`.
+Netty’s `Channel` interface provides an API that greatly reduces the complexity of working directly with `Socket`.
 
 Additionally, `Channel` is the root of an extensive class hierarchy having many predefined, specialized implementations,
 of which the following is a short list:
@@ -282,4 +282,36 @@ of which the following is a short list:
 - `NioDatagramChannel`
 - `NioSctpChannel`
 - `NioSocketChannel`
+
+### Interface EventLoop
+
+The `EventLoop` defines Netty’s core abstraction for handling events that occur during the lifetime of a connection.
+
+These relationships are:
+
+- An `EventLoopGroup` contains one or more `EventLoop`.
+- An `EventLoop` is bound to a single `Thread` for its lifetime.
+- All I/O events processed by an `EventLoop` are handled on its dedicated `Thread`.
+- A `Channel` is registered for its lifetime with a single `EventLoop`.
+- A single `EventLoop` may be assigned to one or more `Channel`.
+
+Note that this design, in which the I/O for a given `Channel` is executed by the same `Thread`, virtually eliminates the
+need for synchronization.
+
+### Interface ChannelFuture
+
+All I/O operations in Netty are **asynchronous**.
+
+Because an operation may not return immediately, we need a way to determine its result at a later time.
+
+For this purpose, Netty provides `ChannelFuture`, whose `addListener()` method registers a `ChannelFutureListener` to be
+notified when an operation has completed (whether or not successfully).
+
+Think of a `ChannelFuture` as a placeholder for the result of an operation that’s to be executed in the future.
+
+When exactly it will be executed may depend on several factors and thus be impossible to predict with precision, but it
+is certain that it will be executed.
+
+Furthermore, all operations belonging to the same `Channel` are guaranteed to be executed in the order in which they
+were invoked.
 
