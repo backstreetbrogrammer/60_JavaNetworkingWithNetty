@@ -16,6 +16,7 @@ Tools used:
 1. [Introduction to Netty](https://github.com/backstreetbrogrammer/60_JavaNetworkingWithNetty#01-introduction-to-netty)
 2. [Project Setup](https://github.com/backstreetbrogrammer/60_JavaNetworkingWithNetty#02-project-setup)
 3. [Hello Netty - first program](https://github.com/backstreetbrogrammer/60_JavaNetworkingWithNetty#03-hello-netty---first-program)
+4. [Netty components and design](https://github.com/backstreetbrogrammer/60_JavaNetworkingWithNetty#04-netty-components-and-design)
 
 ---
 
@@ -245,4 +246,40 @@ Class `EchoClient` implements the bootstrapping of the client.
 - An `InetSocketAddress` is created for the connection to the server.
 - An `EchoClientHandler` will be installed in the pipeline when the connection is established.
 - After everything is set up, `Bootstrap.connect()` is called to connect to the remote peer.
+
+---
+
+## 04. Netty components and design
+
+From a high-level perspective, Netty addresses two corresponding areas of concern:
+
+1. Its asynchronous and event-driven implementation, built on Java NIO, guarantees maximum application performance and
+   scalability under heavy load.
+2. Netty embodies a set of design patterns that decouple application logic from the network layer, simplifying
+   development while maximizing the testability, modularity, and reusability of code.
+
+`Channel`, `EventLoop`, and `ChannelFuture` classes which, taken together, can be thought of as representing Netty’s
+networking abstraction:
+
+- `Channel` — Sockets
+- `EventLoop` — Control flow, multithreading, concurrency
+- `ChannelFuture` — Asynchronous notification
+
+### Interface Channel
+
+Basic I/O operations (`bind()`, `connect()`, `read()`, and `write()`) depend on primitives supplied by the underlying
+network transport.
+
+In Java-based networking, the fundamental construct is class `Socket`.
+
+Netty’s `Channel` interface provides an API that greatly reduces the complexity of working directly with `Sockets`.
+
+Additionally, `Channel` is the root of an extensive class hierarchy having many predefined, specialized implementations,
+of which the following is a short list:
+
+- `EmbeddedChannel`
+- `LocalServerChannel`
+- `NioDatagramChannel`
+- `NioSctpChannel`
+- `NioSocketChannel`
 
