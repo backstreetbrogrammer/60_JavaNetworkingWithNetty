@@ -180,3 +180,67 @@ Key points:
 
 **_Bootstrapping the server_**
 
+Bootstrapping of the server involves the following:
+
+- Bind to the port on which the server will listen for and accept incoming connection requests
+- Configure Channels to notify an `EchoServerHandler` instance about inbound messages
+
+`EchoServer` class is used for bootstrapping the server.
+
+**Summary**
+
+Primary code components of the server:
+
+- The `EchoServerHandler` implements the business logic.
+- The `EchoServer.main()` method bootstraps the server.
+
+The following steps are required in bootstrapping:
+
+- Create a `ServerBootstrap` instance to bootstrap and bind the server.
+- Create and assign an `NioEventLoopGroup` instance to handle event processing, such as accepting new connections and
+  reading/writing data.
+- Specify the local `InetSocketAddress` to which the server binds.
+- Initialize each new `Channel` with an `EchoServerHandler` instance.
+- Call `ServerBootstrap.bind()` to bind the server.
+
+At this point the server is initialized and ready to be used.
+
+---
+
+**_Writing an Echo client_**
+
+The Echo client will:
+
+1. Connect to the server
+2. Send one or more messages
+3. For each message, wait for and receive the same message back from the server
+4. Close the connection
+
+Writing the client involves the same two main code areas we saw in the server: **business logic** and **bootstrapping**.
+
+The client will have a `ChannelInboundHandler` to process the data.
+
+This requires overriding the following methods:
+
+- `channelActive()` — Called after the connection to the server is established
+- `channelRead0()` — Called when a message is received from the server
+- `exceptionCaught()` — Called if an exception is raised during processing
+
+Class `EchoClientHandler` implements the business logic for the client.
+
+**_Bootstrapping the client_**
+
+Bootstrapping a client is similar to bootstrapping a server, with the difference that instead of binding to a listening
+port the client uses host and port parameters to connect to a remote address, here that of the Echo server.
+
+Class `EchoClient` implements the bootstrapping of the client.
+
+**Summary**
+
+- A `Bootstrap` instance is created to initialize the client.
+- An `NioEventLoopGroup` instance is assigned to handle the event processing, which includes creating new connections
+  and processing inbound and outbound data.
+- An `InetSocketAddress` is created for the connection to the server.
+- An `EchoClientHandler` will be installed in the pipeline when the connection is established.
+- After everything is set up, `Bootstrap.connect()` is called to connect to the remote peer.
+
