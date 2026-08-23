@@ -141,6 +141,8 @@ The only dependency we need to add is Netty v4.2.17 as:
 
 ## 03. Hello Netty - first program
 
+[Echo Protocol](https://datatracker.ietf.org/doc/html/rfc862)
+
 We will implement our first client/server application which is an **Echo server**, using Netty.
 
 After the client establishes a connection, it sends one or more messages to the server, which in turn echoes each

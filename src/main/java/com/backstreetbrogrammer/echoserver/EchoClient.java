@@ -1,14 +1,18 @@
 package com.backstreetbrogrammer.echoserver;
 
 import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.CharsetUtil;
 
 import java.net.InetSocketAddress;
+import java.util.Scanner;
 
 public class EchoClient {
     private final String host;
@@ -36,10 +40,32 @@ public class EchoClient {
                  }
              });
 
-            final ChannelFuture f = b.connect().sync(); // connects to the remote peers; waits until the connect completes
-            f.channel().closeFuture().sync(); // blocks until the Channel closes
+            final ChannelFuture f = b.connect().sync();
+            final Channel channel = f.channel();
+            
+            // Start a thread to read user input and send messages
+            readAndSendMessages(channel);
+            
+            channel.closeFuture().sync();
         } finally {
-            group.shutdownGracefully().sync(); // shuts down the thread pools and the release of all resources
+            group.shutdownGracefully().sync();
+        }
+    }
+
+    private void readAndSendMessages(final Channel channel) {
+        try (Scanner scanner = new Scanner(System.in)) {
+            while (channel.isActive()) {
+                String message = scanner.nextLine();
+                
+                if (message.equalsIgnoreCase("quit") || message.equalsIgnoreCase("exit")) {
+                    channel.close();
+                    break;
+                }
+                
+                if (!message.isEmpty()) {
+                    channel.writeAndFlush(Unpooled.copiedBuffer(message, CharsetUtil.UTF_8));
+                }
+            }
         }
     }
 
