@@ -315,3 +315,41 @@ is certain that it will be executed.
 Furthermore, all operations belonging to the same `Channel` are guaranteed to be executed in the order in which they
 were invoked.
 
+### Interface ChannelHandler
+
+From the application developer’s standpoint, the primary component of Netty is the `ChannelHandler`, which serves as the
+container for all application logic that applies to handling inbound and outbound data.
+
+`ChannelHandler` methods are triggered by network events, this means it can be dedicated to almost any kind of action,
+such as converting data from one format to another or handling exceptions thrown during processing.
+
+For example, `ChannelInboundHandler` is a subinterface we’ll implement frequently.
+
+This type receives **inbound events** and data to be handled by our application’s business logic.
+
+We can also flush data from a `ChannelInboundHandler` when we’re sending a response to a connected client.
+
+The business logic of our application will often reside in one or more `ChannelInboundHandler`.
+
+### Interface ChannelPipeline
+
+A `ChannelPipeline` provides a container for a chain of `ChannelHandler`s and defines an API for propagating the flow of
+inbound and outbound events along the chain.
+
+When a `Channel` is created, it is automatically assigned its own `ChannelPipeline`.
+
+`ChannelHandler`s are installed in the `ChannelPipeline` as follows:
+
+- A `ChannelInitializer` implementation is registered with a `ServerBootstrap`.
+- When `ChannelInitializer.initChannel()` is called, the `ChannelInitializer` installs a custom set of `ChannelHandler`s
+  in the pipeline.
+- The `ChannelInitializer` removes itself from the `ChannelPipeline`.
+
+The movement of an event through the pipeline is the work of the `ChannelHandler`s that have been installed during the 
+initialization, or bootstrapping phase of the application. 
+
+These objects receive events, execute the processing logic for which they have been implemented, and pass the data to 
+the next handler in the chain. 
+
+The order in which they are executed is determined by the order in which they were added.
+
