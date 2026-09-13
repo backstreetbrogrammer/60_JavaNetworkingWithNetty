@@ -1,7 +1,6 @@
 # Java Networking with Netty
 
-Netty is a NIO client server framework which enables quick and easy development of network applications such as protocol
-servers and clients. It greatly simplifies and streamlines network programming such as TCP and UDP socket server.
+Java tutorial covering networking, asynchronous programming and using Netty.
 
 Tools used:
 
@@ -13,12 +12,17 @@ Tools used:
 
 ## Table of Contents
 
-- [Part 1 - Java Networking](#part-1---java-networking)
+- [Part 1 - Java Networking and Asynchronous Programming](#part-1---java-networking-and-asynchronous-programming)
     - [01. Introduction to Networking](#01-introduction-to-networking)
     - [02. TCP/IP model](#02-tcpip-model)
     - [03. HTTP Basics](#03-http-basics)
     - [04. TCP Client and Server](#04-tcp-client-and-server)
     - [05. UDP Client and Server](#05-udp-client-and-server)
+    - [06. Introduction to asynchronous programming](#06-introduction-to-asynchronous-programming)
+    - [07. Chaining and Splitting tasks](#07-chaining-and-splitting-tasks)
+    - [08. Controlling threads executing tasks](#08-controlling-threads-executing-tasks)
+    - [09. Error Handling](#09-error-handling)
+    - [10. Best patterns](#10-best-patterns)
 - [Part 2 - Java Networking with Netty](#part-2---java-networking-with-netty)
     - [01. Introduction to Netty](#01-introduction-to-netty)
     - [02. Project Setup](#02-project-setup)
@@ -36,7 +40,7 @@ Tools used:
 
 ---
 
-## Part 1 - Java Networking
+## Part 1 - Java Networking and Asynchronous Programming
 
 ---
 
@@ -940,12 +944,8 @@ handling.
 The connection listening thread that calls `accept()` creates and starts a new **Thread** to handle the connection and
 quickly goes back to accepting more connections.
 
-The `handle()` method is left unchanged, but it's now executed in parallel by multiple threads, each handling their
-connection.
-
-The computation time of the previous example goes from `6 + 6 + 6 = 18 seconds` to `max(6, 6, 6) = 6 seconds`.
-
-Now all requests from separate users are completely independent.
+In this case, the handling of each request is completely independent, and the time to process a request and send the
+order to downstream goes down from `6 + 6 + 6 = 18 seconds` to `6 seconds`.
 
 However, there are few caveats:
 
@@ -1022,125 +1022,6 @@ public class ThreadPerOrderHandlerOMS {
         final var t3 = new Thread(() -> order.persist(OrderStatePersist.persist(request)));
 
         return List.of(t1, t2, t3);
-    }
-
-}
-```
-
-The first issue above can be easily fixed by using multiple threads for order parsing, validating, persisting and
-sending the order to downstream.
-
-After a request is parsed and an order is created, three helper threads are created: one for validating, one to enrich,
-and one to persist the order.
-
-The three threads are then started and begin to execute their code in parallel.
-
-The `join` method is a blocking method that waits for a thread to terminate.
-
-After all three of the helper threads are terminated, the connection-handling thread sends the fully assembled order to
-downstream, and the time to process a request becomes `1 + 1 + max(1, 1, 1) + 1 = 4 seconds`.
-
-This is a pattern sometimes known as `fork/join` or `scatter/gather`.
-
-However, this design has again few caveats:
-
-- the order needs to be created before the threads are started, and this order object needs to be **thread-safe**,
-  because the `validate`, `enrich`, and `persist` methods are potentially called concurrently (and presumably could each
-  modify the order). Therefore, these methods will need to use proper synchronization (such as locks) to make sure the
-  threads don't interfere with each other in unwanted ways.
-
-```
-    public synchronized Order validate(final Order validatedOrder) {
-        // validation logic...
-        return validatedOrder;
-    }
-
-    public synchronized Order enrich(final Order enrichedOrder) {
-        // enrichment logic...
-        return enrichedOrder;
-    }
-
-    public synchronized Order persist(final Order persistedOrder) {
-        // persistence logic...
-        return persistedOrder;
-    }
-
-    public synchronized void sendToDownstream() {
-        // connection logic to downstream...
-        waitForOneSecond();
-    }
-```
-
-- inefficient and uncontrolled thread creation - for `n` simultaneous connections, there could be `4n` threads created
-  and destroyed each time.
-
-```java
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-
-public class ThreadPerOrderHandlerOptimisedOMS {
-
-    private static final AtomicInteger clientCounter = new AtomicInteger();
-
-    public static void main(final String[] args) throws IOException {
-        final var port = 8080;
-        final var serverSocket = new ServerSocket(port);
-        System.out.printf("Listening on port %d%n", port);
-        while (!serverSocket.isClosed()) {
-            final var socket = serverSocket.accept(); // blocks and socket can never be null
-            new Thread(() -> handle(socket, clientCounter.addAndGet(1))).start();    // create a new thread to handle request
-        }
-    }
-
-    private static void handle(final Socket socket, final int clientNo) {
-        System.out.println("\n----------------------------");
-        System.out.printf("Connected to Client-%d on socket=[%s]%n", clientNo, socket);
-        try (
-                socket
-        ) {
-            final var start = Instant.now();
-            final var request = new Request(socket);          // parse the request
-            final var order = new Order(request);             // create an Order from the request
-
-            final var threads = getOrderParsingThreads(order, request);
-            for (final var t : threads) {
-                t.start();
-            }
-
-            // update the latest order state to persistence
-            order.persist(OrderStatePersist.persist(request));
-
-            for (final var t : threads) {
-                t.join();
-            }
-
-            // send the order to downstream
-            order.sendToDownstream();
-
-            final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
-            System.out.printf("%nOrder [%s] sent to downstream in [%d] ms%n%n", order, timeElapsed);
-
-        } catch (final IOException | InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            System.out.printf("Disconnected from Client-%d on socket=[%s]%n", clientNo, socket);
-            System.out.println("----------------------------\n");
-        }
-    }
-
-    private static List<Thread> getOrderParsingThreads(final Order order, final Request request) {
-        // validate the order client's wallet if enough funds
-        final var t1 = new Thread(() -> order.validate(ClientWallet.validate(request)));
-
-        // enrich the order with latest market data
-        final var t2 = new Thread(() -> order.enrich(MarketData.enrich(request)));
-
-        return List.of(t1, t2);
     }
 
 }
@@ -1364,170 +1245,16 @@ public class FuturesBasedOMS {
                 socket
         ) {
             final var start = Instant.now();
-            final var request = new Request(socket);
+            final var request = new Request(socket);          // parse the request
+            final var order = new Order(request);             // create an Order from the request
 
-            final var orderValidateFuture =
-                    CompletableFuture.supplyAsync(() -> ClientWallet.validate(request), orderHandlerPool);
-            final var orderEnrichFuture =
-                    CompletableFuture.supplyAsync(() -> MarketData.enrich(request), orderHandlerPool);
-            final var orderPersistFuture =
-                    CompletableFuture.supplyAsync(() -> OrderStatePersist.persist(request), orderHandlerPool);
+            final CompletableFuture<Void> future
+                    = CompletableFuture.runAsync(() -> order.validate(ClientWallet.validate(request)), orderHandlerPool)
+                                       .thenRunAsync(() -> order.enrich(MarketData.enrich(request)), orderHandlerPool)
+                                       .thenRunAsync(() -> order.persist(OrderStatePersist.persist(request)), orderHandlerPool);
 
-            new Order(request)
-                    .validate(orderValidateFuture.join())
-                    .enrich(orderEnrichFuture.join())
-                    .persist(orderPersistFuture.join())
-                    .sendToDownstream();
-
-            final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
-            System.out.printf("%nOrder sent to downstream in [%d] ms%n%n", timeElapsed);
-
-        } catch (final IOException e) {
-            throw new RuntimeException(e);
-        } finally {
-            System.out.printf("Disconnected from Client-%d on socket=[%s]%n", clientNo, socket);
-            System.out.println("----------------------------\n");
-        }
-    }
-
-}
-```
-
-Futures are a standard Java abstraction that allows concurrent code to shift to a more **functional** flavor in which
-threads run functions and produce values, while combining the synchronization capabilities of the **latch** mechanism
-used earlier.
-
-Essentially, a **future** represents an **asynchronously** running function and offers mechanisms for threads to wait
-for the output of the function.
-
-Running a blocking code in another thread is a way to avoid blocking the main thread of our application.
-
-```
-        ExecutorService service = ...;
-        HTTPClient client = ...;
-        Future<String> future =
-                service.submit(() – >
-                        client.get("https://github.com/backstreetbrogrammer/data"));
-        // do some other stuff
-        String response = future.get();
-```
-
-The call to `get()` is still a **blocking** call, but blocks another thread and not the `main` thread. Our application
-thread is free to do something else.
-
-We can get the response through this `future` object By calling `future.get()`, which is a blocking call.
-
-Java 8's Concurrent API introduced `CompletableFuture`, a valuable tool for simplifying asynchronous and non-blocking
-programming.
-
-The `CompletableFuture` class implements `CompletionStage` interface and the `Future` interface.
-
-Now, our order handling logic completely changes like this:
-
-```
-            final var request = new Request(socket);
-
-            final var orderValidateFuture =
-                    CompletableFuture.supplyAsync(() -> ClientWallet.validate(request), orderHandlerPool);
-            final var orderEnrichFuture =
-                    CompletableFuture.supplyAsync(() -> MarketData.enrich(request), orderHandlerPool);
-            final var orderPersistFuture =
-                    CompletableFuture.supplyAsync(() -> OrderStatePersist.persist(request), orderHandlerPool);
-
-            new Order(request)
-                    .validate(orderValidateFuture.join())
-                    .enrich(orderEnrichFuture.join())
-                    .persist(orderPersistFuture.join())
-                    .sendToDownstream();
-```
-
-The implementation of the server is fairly straightforward:
-
-Simply create a **future** for any part of the computation that needs to run **asynchronously**.
-
-This approach pools threads for reuse, avoids the **latch** (futures implement their own **synchronization**), and,
-importantly, the **order** is created and populated by a **single** thread and does not need to be **thread-safe**
-anymore.
-
-The new order object is created by the connection-handling thread **in parallel** with the validation, enrichment and
-persistence tasks (which no longer need the order).
-
-Thus, the time to process a request and send the order to downstream goes down from
-`1 + 1 + max(1, 1, 1) + 1 = 4 seconds` to `1 + max(1, 1, 1) + 1 = 3 seconds`.
-
-However, the fact that threads are **blocked** on the `join` method while waiting for futures to be completed remains
-problematic in two ways:
-
-- This **blocking** invites the possibility of **deadlocks**. The issue was addressed here by using **two** separate
-  thread pools. On larger, more complex systems, however, the problem can become quite tricky. **Multiplying pools** or
-  **increasing pool sizes** to guarantee the absence of deadlocks tends to result in a large number of threads which,
-  when they are not blocked, lead to a suboptimal usage of computing resources.
-- Blocking and unblocking threads, even in the best of scenarios, has a non-negligible cost. The actual **parking** and
-  **unparking** of threads by the operating system take time. Furthermore, parked threads tend to see their data in
-  processor-level caches overwritten by other threads, resulting in cache misses when the threads resume execution.
-  Accordingly, techniques were devised to minimize thread blocking, ideally, to avoid it entirely.
-
-**_Futures with Callbacks OMS_**
-
-```java
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
-
-public class FuturesWithCallbacksOMS {
-
-    private static final AtomicInteger clientCounter = new AtomicInteger();
-    private static final ExecutorService threadPool = Executors.newFixedThreadPool(12);
-
-    public static void main(final String[] args) throws IOException {
-        final var port = 8080;
-        final var serverSocket = new ServerSocket(port);
-        System.out.printf("Listening on port %d%n", port);
-
-        try {
-            while (!serverSocket.isClosed()) {
-                final var socket = serverSocket.accept(); // blocks and socket can never be null
-                threadPool.execute(() -> handle(socket, clientCounter.addAndGet(1)));
-            }
-        } finally {
-            threadPool.close();
-        }
-    }
-
-    private static void handle(final Socket socket, final int clientNo) {
-        System.out.println("\n----------------------------");
-        System.out.printf("Connected to Client-%d on socket=[%s]%n", clientNo, socket);
-        try (
-                socket
-        ) {
-            final var start = Instant.now();
-            final var request = new Request(socket);
-
-            final var orderValidateFuture =
-                    CompletableFuture.supplyAsync(() -> ClientWallet.validate(request), threadPool);
-            final var orderEnrichFuture =
-                    CompletableFuture.supplyAsync(() -> MarketData.enrich(request), threadPool);
-            final var orderPersistFuture =
-                    CompletableFuture.supplyAsync(() -> OrderStatePersist.persist(request), threadPool);
-
-            final var order = new Order(request);
-
-            orderValidateFuture.thenAccept(
-                    validatedOrder ->
-                            orderEnrichFuture.thenAccept(
-                                    enrichedOrder ->
-                                            orderPersistFuture.thenAccept(
-                                                    persistedOrder ->
-                                                            order.validate(validatedOrder)
-                                                                 .enrich(enrichedOrder)
-                                                                 .persist(persistedOrder)
-                                                                 .sendToDownstream())));
+            // send the order to downstream
+            order.sendToDownstream();
 
             final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
             System.out.printf("%nOrder [%s] sent to downstream in [%d] ms%n%n", order, timeElapsed);
@@ -1543,29 +1270,89 @@ public class FuturesWithCallbacksOMS {
 }
 ```
 
-One of the oldest strategies is the idea of a **callback**.
+The main difference in the code is that we use `CompletableFuture.runAsync()` to run the tasks asynchronously.
 
-Instead of waiting for the result of a future, which requires **blocking**, the developer specifies, as a **callback**,
-the computation that will use this result.
+The `thenRunAsync()` method is used to execute the next task after the previous one completes.
 
-Time taken is same as before: `1 + max(1, 1, 1) + 1 = 3 seconds`.
+The order of execution is the same as the order of method calls.
 
-The future `thenAccept` method takes as its argument the code that will **consume** the output of the future.
+However, there is one drawback:
 
-Note that the invocation of `thenAccept` only registers this code for **later execution**; it does not wait for the
-future to be completed and, thus, it takes very little time.
+- Order must be **thread-safe** again and needs to be constructed first, before the validation, enrichment and
+  persistence tasks are started.
 
-The actual object building will run later, in the thread pool, after the validation, enrichment and persistence tasks
-are done. As a result, a single request is processed in one second as before.
+This can be avoided by bringing back **futures** but having the futures run by **virtual threads**.
 
-Threads are never blocked in this server, and a single, reasonably sized pool can be used.
+**_Virtual Threads with Futures OMS_**
 
-The code above is **free from deadlocks** for any pool size.
+```java
+import java.io.IOException;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
-Indeed, setting `threadPool` as a **single-thread pool** would result in a sequential server, but would not cause any
-deadlock.
+public class VirtualThreadWithFuturesOMS {
 
-However, still there is one caveat here:
+    private static final AtomicInteger clientCounter = new AtomicInteger();
+
+    public static void main(final String[] args) throws IOException {
+        final var port = 8080;
+        final var serverSocket = new ServerSocket(port);
+        System.out.printf("Listening on port %d%n", port);
+        while (!serverSocket.isClosed()) {
+            final var socket = serverSocket.accept(); // blocks and socket can never be null
+            Thread.startVirtualThread(
+                    () -> handle(socket, clientCounter.addAndGet(1))); // create a new virtual thread to handle request
+        }
+    }
+
+    private static void handle(final Socket socket, final int clientNo) {
+        System.out.println("\n----------------------------");
+        System.out.printf("Connected to Client-%d on socket=[%s]%n", clientNo, socket);
+        try (
+                socket
+        ) {
+            final var start = Instant.now();
+            final var request = new Request(socket);
+
+            final CompletableFuture<Void> future
+                    = CompletableFuture.runAsync(() -> order.validate(ClientWallet.validate(request)))
+                                       .thenRunAsync(() -> order.enrich(MarketData.enrich(request)))
+                                       .thenRunAsync(() -> order.persist(OrderStatePersist.persist(request)));
+
+            // send the order to downstream
+            order.sendToDownstream();
+
+            final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
+            System.out.printf("%nOrder [%s] sent to downstream in [%d] ms%n%n", order, timeElapsed);
+
+        } catch (final IOException e) {
+            throw new RuntimeException(e);
+        } finally {
+            System.out.printf("Disconnected from Client-%d on socket=[%s]%n", clientNo, socket);
+            System.out.println("----------------------------\n");
+        }
+    }
+
+}
+```
+
+Time taken to process a request is: `1 + 1 + max(1, 1, 1) + 1 = 4 seconds`.
+
+The main difference with using traditional threads is that virtual threads do NOT entail any **OS-level blocking**.
+
+When a virtual thread invokes `join` on a thread that is still running, it does not block the underlying OS thread,
+which continues to run other virtual threads.
+
+In this case, the only actual processing that the connection-handling thread performs is the building of a base order.
+
+Virtual threads help to improve the **throughput** of typical server applications precisely because such applications
+consist of a great number of concurrent tasks that spend much of their time **waiting**.
+
+However, there is one caveat here:
 
 - Callbacks are notoriously hard to write and even harder to debug.
 
@@ -1613,393 +1400,26 @@ public class FuturesWithCompositionOMS {
             final var start = Instant.now();
             final var request = new Request(socket);
 
-            final var orderValidateFuture =
-                    CompletableFuture.supplyAsync(() -> ClientWallet.validate(request), threadPool);
-            final var orderEnrichFuture =
-                    CompletableFuture.supplyAsync(() -> MarketData.enrich(request), threadPool);
-            final var orderPersistFuture =
-                    CompletableFuture.supplyAsync(() -> OrderStatePersist.persist(request), threadPool);
-
-            CompletableFuture.completedFuture(new Order(request))
-                             .thenCombine(orderValidateFuture, Order::validate)
-                             .thenCombine(orderEnrichFuture, Order::enrich)
-                             .thenCombine(orderPersistFuture, Order::persist)
-                             .thenAccept(Order::sendToDownstream);
-
-            final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
-            System.out.printf("%nOrder sent to downstream in [%d] ms%n%n", timeElapsed);
-
-        } catch (final IOException e) {
-            throw new RuntimeException(e);
-        } finally {
-            System.out.printf("Disconnected from Client-%d on socket=[%s]%n", clientNo, socket);
-            System.out.println("----------------------------\n");
-        }
-    }
-
-}
-```
-
-Fortunately, modern futures offer other mechanisms to process their value in a non-blocking fashion.
-
-In Java, a `thenCombine` method can be used to **combine** the results of two futures using a two-argument function.
-
-Time taken is same as before: `1 + max(1, 1, 1) + 1 = 3 seconds`.
-
-The handling thread creates a new order, as before, but wraps it in a **future** so that `thenCombine` can be called for
-**validation**, and then it calls again with the **enrichment** and **persistence** tasks.
-
-Finally, a **callback** `thenAccept` is used to send the order to downstream.
-
-None of this code is **blocking**.
-
-Pool threads jump from validation, enrichment and persistence tasks to order building and order sending, performing
-tasks as they become available, even across separate requests.
-
-In this case, the only actual processing that the connection-handling thread performs is the building of a base order.
-
-### Virtual Threads
-
-Every instance of `java.lang.Thread` in the JDK is a **platform thread**.
-
-A **platform thread** runs Java code on an underlying **OS thread** and captures the OS thread for the code's entire
-lifetime.
-
-The number of **platform threads** is limited to the number of **OS threads**.
-
-A **virtual thread** is an instance of `java.lang.Thread` that runs Java code on an underlying **OS thread** but does
-not capture the **OS thread** for the code's entire lifetime.
-
-This means that **many virtual threads** can run their Java code on the **same OS thread**, effectively sharing it.
-
-While a **platform thread** monopolizes a precious **OS thread**, a **virtual thread** does not.
-
-The number of **virtual threads** can be much larger than the number of **OS threads**.
-
-![VirtualThreadHighLevel](VirtualThreadHighLevel.PNG)
-
-Virtual threads are a lightweight implementation of threads that are provided by the **JDK** rather than the **OS** and
-may be treated as **user-mode threads**.
-
-Virtual threads employ `M:N` scheduling, where a large number (`M`) of virtual threads is scheduled to run on a smaller
-number (`N`) of OS threads.
-
-![VirtualThreadUML](VirtualThreadUML.PNG)
-
-Virtual threads run by mounting an actual OS thread. When blocked, they unmount their OS thread, leaving it free to run
-the code of other virtual threads.
-
-![VirtualThreadMounting](VirtualThreadMounting.PNG)
-
-**_Code Demo_**
-
-- **Test Case 1: Test platform thread using Thread constructor**
-
-```
-    @Test
-    @DisplayName("Test platform thread using Thread constructor")
-    void testPlatformThreadUsingThreadConstructor() throws InterruptedException {
-        final var platformThread = new Thread(() -> System.out.printf("I am running inside thread=%s%n",
-                                                                      Thread.currentThread()));
-        platformThread.start();
-        platformThread.join();
-    }
-```
-
-**Output**:
-
-```
-I am running inside thread=Thread[#25,Thread-0,5,main]
-```
-
-- **Test Case 2: Test platform thread using `Thread.ofPlatform()` method**
-
-```
-    @Test
-    @DisplayName("Test platform thread using Thread.ofPlatform() method")
-    void testPlatformThreadUsingThreadOfPlatformMethod() throws InterruptedException {
-        final var platformThread = Thread.ofPlatform().unstarted(() ->
-                                                                         System.out.printf("I am running inside thread=%s%n",
-                                                                                           Thread.currentThread()));
-        platformThread.start();
-        platformThread.join();
-    }
-```
-
-**Output**:
-
-```
-I am running inside thread=Thread[#25,Thread-0,5,main]
-```
-
-- **Test Case 3: Test virtual thread using `Thread.ofVirtual()` method**
-
-```
-    @Test
-    @DisplayName("Test virtual thread using Thread.ofVirtual() method")
-    void testVirtualThreadUsingThreadOfVirtualMethod() throws InterruptedException {
-        final var virtualThread = Thread.ofVirtual().unstarted(() ->
-                                                                       System.out.printf("I am running inside thread=%s%n",
-                                                                                         Thread.currentThread()));
-        virtualThread.start();
-        virtualThread.join();
-    }
-```
-
-**Output**:
-
-```
-I am running inside thread=VirtualThread[#25]/runnable@ForkJoinPool-1-worker-1
-```
-
-- **Test Case 4: Test multiple virtual threads**
-
-```
-    @Test
-    @DisplayName("Test multiple virtual threads")
-    void testMultipleVirtualThreads() throws InterruptedException {
-        final Runnable runnable = () -> System.out.printf("I am running inside thread=%s%n",
-                                                          Thread.currentThread());
-        final List<Thread> virtualThreads = new ArrayList<>();
-        for (var i = 0; i < 3; i++) {
-            virtualThreads.add(Thread.ofVirtual().unstarted(runnable));
-        }
-        for (final var virtualThread : virtualThreads) {
-            virtualThread.start();
-        }
-        for (final var virtualThread : virtualThreads) {
-            virtualThread.join();
-        }
-    }
-```
-
-**Output**:
-
-```
-I am running inside thread=VirtualThread[#27]/runnable@ForkJoinPool-1-worker-3
-I am running inside thread=VirtualThread[#25]/runnable@ForkJoinPool-1-worker-2
-I am running inside thread=VirtualThread[#26]/runnable@ForkJoinPool-1-worker-2
-```
-
-- **Test Case 5: Test large number of virtual threads**
-
-The test case first obtains an `ExecutorService` that will create a new virtual thread for each submitted task.
-
-It then submits `10,000` tasks and waits for all of them to complete:
-
-```
-    @Test
-    @DisplayName("Test large number of virtual threads")
-    void testLargeNumberOfVirtualThreads() {
-        try (final var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            IntStream.range(0, 10_000).forEach(i -> {
-                executor.submit(() -> {
-                    TimeUnit.SECONDS.sleep(1L);
-                    return i;
-                });
-            });
-        }  // executor.close() is called implicitly, and waits
-    }
-```
-
-**Output**:
-
-```
-The test case runs in around 1 seconds => it means that all 10,000 integers were executed in parallel in virtual 
-threads.
-```
-
-The task in this example is simple code — sleep for one second — and modern hardware can easily support 10,000 virtual
-threads running such code concurrently.
-
-Behind the scenes, the JDK runs the code on a small number of OS threads, perhaps as few as one.
-
-Things would be very different if this program used an `ExecutorService` that creates a new **platform thread** for each
-task, such as `Executors.newCachedThreadPool()`.
-
-The `ExecutorService` would attempt to create 10,000 platform threads, and thus 10,000 OS threads, and the program might
-crash, depending on the machine and operating system.
-
-Things would be not much better if the program, instead, used an `ExecutorService` that obtains platform threads from a
-pool, such as `Executors.newFixedThreadPool(200)`.
-
-The `ExecutorService` would create 200 platform threads to be shared by all 10,000 tasks, so many of the tasks would run
-sequentially rather than concurrently and the program would take a long time to complete.
-
-For this program, a pool with 200 platform threads can only achieve a throughput of `200 tasks-per-second`, whereas
-virtual threads achieve a throughput of about `10,000 tasks-per-second` (after sufficient warmup).
-
-Moreover, if the `10_000` in the example program is changed to `1_000_000`, then the program would submit `1_000_000`
-tasks, create `1_000_000` virtual threads that run concurrently, and (after sufficient warmup) achieve a throughput of
-about `1_000_000` **tasks-per-second**.
-
-If the tasks in this program performed a calculation for one second (e.g., sorting a huge array), rather than merely
-sleeping, then increasing the number of threads beyond the number of processor cores would not help, whether they are
-virtual threads or platform threads.
-
-Virtual threads are not faster threads — they do not run code any faster than platform threads.
-
-They exist to provide scale (higher **throughput**), not speed (lower **latency**).
-
-There can be many more of them than platform threads, so they enable the higher concurrency needed for higher throughput
-according to `Little's Law`.
-
-To put it another way, virtual threads can significantly improve application **throughput** when:
-
-- The number of concurrent tasks is high (more than a few thousand), and
-- The workload is not CPU-bound, since having many more threads than processor cores cannot improve throughput in that
-  case.
-
-Virtual threads help to improve the **throughput** of typical server applications precisely because such applications
-consist of a great number of concurrent tasks that spend much of their time **waiting**.
-
-Besides that, we should also consider a few other points while using virtual threads:
-
-- there is no improvement in **latency**, but only **throughput**
-- virtual threads are always **daemon** threads => trying to set it to non-daemon will result in exception
-- virtual threads should never be used as fixed-size thread pool
-- virtual threads always have default priority => trying to change the priority will cause no effect
-
-Let's get back to our OMS server design.
-
-**_Virtual Threads based OMS_**
-
-```java
-public class VirtualThreadPerOrderHandlerOMS {
-
-    private static final AtomicInteger clientCounter = new AtomicInteger();
-
-    public static void main(final String[] args) throws IOException {
-        final var port = 8080;
-        final var serverSocket = new ServerSocket(port);
-        System.out.printf("Listening on port %d%n", port);
-        while (!serverSocket.isClosed()) {
-            final var socket = serverSocket.accept(); // blocks and socket can never be null
-            Thread.startVirtualThread(
-                    () -> handle(socket, clientCounter.addAndGet(1))); // create a new virtual thread to handle request
-        }
-    }
-
-    private static void handle(final Socket socket, final int clientNo) {
-        System.out.println("\n----------------------------");
-        System.out.printf("Connected to Client-%d on socket=[%s]%n", clientNo, socket);
-        try (
-                socket
-        ) {
-            final var start = Instant.now();
-            final var request = new Request(socket);          // parse the request
-            final var order = new Order(request);             // create an Order from the request
-
-            final var virtualThreads = startOrderParsingVirtualThreads(order, request);
-
-            for (final var t : virtualThreads) {
-                t.join();
-            }
-
-            // send the order to downstream
-            order.sendToDownstream();
+            final CompletableFuture<MarketData> cfReuters = CompletableFuture.supplyAsync(fetchMarketDataReuters);
+            final CompletableFuture<MarketData> cfBloomberg = CompletableFuture.supplyAsync(fetchMarketDataBloomberg);
+            final CompletableFuture<MarketData> cfExegy = CompletableFuture.supplyAsync(fetchMarketDataExegy);
+
+            CompletableFuture.allOf(cfReuters, cfBloomberg, cfExegy) // CompletableFuture<Void>
+                             .thenAccept(v -> {
+                                 try {
+                                     final MarketData bestMarketData = Stream.of(cfReuters, cfBloomberg, cfExegy)  // Stream<CompletableFuture<MarketData>>
+                                                                             .map(CompletableFuture::join)         // Stream<MarketData>
+                                                                             .min(comparing(MarketData::getPrice)) // Optional<MarketData>
+                                                                             .orElseThrow();
+                                     System.out.printf("Best price [CF ] = %s%n", bestMarketData);
+                                 } catch (final Exception e) {
+                                     System.err.printf("Error: %s%n", e.getMessage());
+                                 }
+                             }).join();
 
             final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
             System.out.printf("%nOrder [%s] sent to downstream in [%d] ms%n%n", order, timeElapsed);
 
-        } catch (final IOException | InterruptedException e) {
-            throw new RuntimeException(e);
-        } finally {
-            System.out.printf("Disconnected from Client-%d on socket=[%s]%n", clientNo, socket);
-            System.out.println("----------------------------\n");
-        }
-    }
-
-    private static List<Thread> startOrderParsingVirtualThreads(final Order order, final Request request) {
-        // validate the order client's wallet if enough funds
-        final var t1 = Thread.startVirtualThread(() -> order.validate(ClientWallet.validate(request)));
-
-        // enrich the order with latest market data
-        final var t2 = Thread.startVirtualThread(() -> order.enrich(MarketData.enrich(request)));
-
-        // update the latest order state to persistence
-        final var t3 = Thread.startVirtualThread(() -> order.persist(OrderStatePersist.persist(request)));
-
-        return List.of(t1, t2, t3);
-    }
-
-}
-```
-
-Time taken to process a request is: `1 + 1 + max(1, 1, 1) + 1 = 4 seconds`.
-
-The main difference with using traditional threads is that virtual threads do NOT entail any **OS-level blocking**.
-
-When a virtual thread invokes `join` on a thread that is still running, it does not block the underlying OS thread,
-which continues to run other virtual threads.
-
-In effect, the OS threads jump from code to code when using higher-order methods on **futures**, and they do so in a
-familiar programming style.
-
-Because they are lightweight, virtual threads are also cheap to create and don't need to be pooled.
-
-This also has a big advantage that if there are many client requests being received at the same time - virtual threads
-will be able to handle it proving much better **throughput**.
-
-However, there is one drawback:
-
-- Order must be **thread-safe** again and needs to be constructed first, before the validation, enrichment and
-  persistence tasks are started.
-
-This can be avoided by bringing back **futures** but having the futures run by **virtual threads**.
-
-**_Virtual Threads with Futures OMS_**
-
-```java
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
-
-public class VirtualThreadWithFuturesOMS {
-
-    private static final AtomicInteger clientCounter = new AtomicInteger();
-
-    public static void main(final String[] args) throws IOException {
-        final var port = 8080;
-        final var serverSocket = new ServerSocket(port);
-        System.out.printf("Listening on port %d%n", port);
-        while (!serverSocket.isClosed()) {
-            final var socket = serverSocket.accept(); // blocks and socket can never be null
-            Thread.startVirtualThread(
-                    () -> handle(socket, clientCounter.addAndGet(1))); // create a new virtual thread to handle request
-        }
-    }
-
-    private static void handle(final Socket socket, final int clientNo) {
-        System.out.println("\n----------------------------");
-        System.out.printf("Connected to Client-%d on socket=[%s]%n", clientNo, socket);
-        try (
-                socket
-        ) {
-            final var start = Instant.now();
-            final var request = new Request(socket);
-
-            final var orderValidateFuture = new CompletableFuture<Order>();
-            final var orderEnrichFuture = new CompletableFuture<Order>();
-            final var orderPersistFuture = new CompletableFuture<Order>();
-
-            Thread.startVirtualThread(() -> orderValidateFuture.complete(ClientWallet.validate(request)));
-            Thread.startVirtualThread(() -> orderEnrichFuture.complete(MarketData.enrich(request)));
-            Thread.startVirtualThread(() -> orderPersistFuture.complete(OrderStatePersist.persist(request)));
-
-            new Order(request)
-                    .validate(orderValidateFuture.join())
-                    .enrich(orderEnrichFuture.join())
-                    .persist(orderPersistFuture.join())
-                    .sendToDownstream();
-
-            final var timeElapsed = (Duration.between(start, Instant.now()).toMillis());
-            System.out.printf("%nOrder sent to downstream in [%d] ms%n%n", timeElapsed);
-
         } catch (final IOException e) {
             throw new RuntimeException(e);
         } finally {
@@ -2010,620 +1430,3 @@ public class VirtualThreadWithFuturesOMS {
 
 }
 ```
-
-Time taken to process a request is: `1 + max(1, 1, 1) + 1 = 3 seconds`.
-
-The order is now created while the validation, enrichment and persistence tasks are running, and it doesn't need to be
-thread-safe.
-
-The key difference with using previous **futures based OMS** is that `join` is now implemented without blocking an OS
-thread.
-
-Performance-wise, both versions are equivalent: OS threads are reused by pooling and are never blocked, but they are
-written in two very different styles, one more traditional (imperative) and the other more functional.
-
-If we use `10_000` sockets client connection at the same time - virtual thread-based OMS will be able to handle it
-without any issue.
-
-```java
-public class SocketClient {
-
-    public static void main(final String[] args) throws IOException, InterruptedException {
-        final var sockets = new Socket[10_000];
-
-        // connect
-        for (var i = 0; i < sockets.length; i++) {
-            sockets[i] = new Socket("localhost", 8080);
-            System.out.printf("Connected: [%s]%n", sockets[i]);
-        }
-
-        TimeUnit.SECONDS.sleep(1L);
-
-        // disconnect
-        for (final var socket : sockets) {
-            if (socket != null) {
-                socket.close();
-                System.out.printf("Disconnected: [%s]%n", socket);
-            }
-        }
-    }
-
-}
-```
-
-However, platform threads based OMS using `Executors.newCachedThreadPool()` or **thread-per-client** may suffer from
-connection exceptions and the servers using `Executors.newFixedThreadPool(n)` will suffer from throughput degradation
-and take long time to serve all the clients and send the order to send downstream.
-
----
-
-## 05. UDP Client and Server
-
-UDP is a communication protocol that transmits independent packets over the network with no guarantee of arrival and no
-guarantee of the order of delivery.
-
-The lack of overhead can make UDP significantly faster than TCP.
-
-Apart from speed, we also need to remember that some kinds of communication do not require the reliability of TCP but
-value low latency instead.
-
-The market data streaming from Reuters or Bloomberg is a good example of an application that might benefit from running
-over UDP instead of TCP.
-
-Building UDP applications is very similar to building a TCP system; the only difference is that we don't establish a
-point to point connection between a client and a server.
-
-To perform networking operations over UDP, we only need to import the classes from the `java.net` package:
-
-- `java.net.DatagramSocket`
-- `java.net.DatagramPacket`
-
-Let's start with our **UDP server** first:
-
-```java
-import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-public class GuidemyUDPServer implements Runnable {
-
-    private final DatagramSocket socket;
-    private final AtomicBoolean running = new AtomicBoolean(true);
-    private byte[] buf = new byte[256];
-
-    public GuidemyUDPServer(final int port) {
-        try {
-            socket = new DatagramSocket(port);
-        } catch (final SocketException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public void run() {
-        while (running.get()) {
-            try {
-                DatagramPacket packet = new DatagramPacket(buf, buf.length);
-                socket.receive(packet);
-                final String received = new String(buf, 0, packet.getLength());
-                System.out.printf("[UDP-Server] Received text from client: [%s]%n", received);
-
-                final InetAddress address = packet.getAddress();
-                final int port = packet.getPort();
-                packet = new DatagramPacket(buf, buf.length, address, port);
-
-                // echo same back to the client
-                socket.send(packet);
-
-                if ("quit".equalsIgnoreCase(received)) {
-                    running.set(false);
-                }
-            } catch (final SocketException e) {
-                System.err.printf("[UDP-Server] SocketException: %s%n", e.getMessage());
-            } catch (final IOException e) {
-                System.err.printf("[UDP-Server] IOException: %s%n", e.getMessage());
-            }
-        }
-        socket.close();
-    }
-
-    public void stop() {
-        running.set(false);
-    }
-}
-```
-
-**UDP client** class:
-
-```java
-import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketTimeoutException;
-
-public class GuidemyUDPClient {
-
-    private final DatagramSocket socket;
-    private final InetAddress address;
-
-    private final int port;
-    private byte[] buf;
-
-    public GuidemyUDPClient(final DatagramSocket socket, final InetAddress address, final int port) {
-        this.socket = socket;
-        this.address = address;
-        this.port = port;
-    }
-
-    public String sendEcho(final String msg) {
-        try {
-            buf = msg.getBytes();
-            DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-            socket.send(packet);
-
-            packet = new DatagramPacket(buf, buf.length);
-            socket.receive(packet);
-            return new String(packet.getData(), 0, packet.getLength());
-        } catch (final SocketTimeoutException e) {
-            System.out.println("[UDP-Client] The socket timed out");
-        } catch (final IOException e) {
-            System.out.printf("[UDP-Client] Error: %s%n", e.getMessage());
-        }
-        return null;
-    }
-
-    public void close() {
-        socket.close();
-    }
-}
-```
-
-**Now we can run UDP client-server demo:**
-
-```java
-import java.io.IOException;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
-import java.util.Scanner;
-
-public class UDPDemo {
-
-    public static void main(final String[] args) {
-        try {
-            final int port = 5000;
-
-            // start the server
-            final GuidemyUDPServer server = new GuidemyUDPServer(port);
-            new Thread(server).start();
-
-            // create the client
-            final var socket = new DatagramSocket();
-            final var localhost = InetAddress.getByName("localhost");
-            final var client = new GuidemyUDPClient(socket, localhost, port);
-
-            try (final Scanner scanner = new Scanner(System.in)) {
-                String echoString;
-                do {
-                    System.out.println("Enter string to be echoed: ");
-                    echoString = scanner.nextLine();
-
-                    final String echoReceivedFromServer = client.sendEcho(echoString);
-                    System.out.printf("Echo received from server: [%s]%n", echoReceivedFromServer);
-                    System.out.println("------------------------------------");
-                } while (!"quit".equalsIgnoreCase(echoString));
-            } finally {
-                client.close();
-                server.stop();
-            }
-        } catch (final SocketException e) {
-            System.err.printf("SocketException: %s%n", e.getMessage());
-        } catch (final IOException e) {
-            System.err.printf("IOException: %s%n", e.getMessage());
-        }
-    }
-}
-```
-
-**Sample output from the terminal**:
-
-```
-Enter string to be echoed: 
-Rishi Srivastava
-[UDP-Server] Received text from client: [Rishi Srivastava]
-Echo received from server: [Rishi Srivastava]
-------------------------------------
-Enter string to be echoed: 
-Guidemy is the best
-[UDP-Server] Received text from client: [Guidemy is the best]
-Echo received from server: [Guidemy is the best]
-------------------------------------
-Enter string to be echoed: 
-quit
-[UDP-Server] Received text from client: [quit]
-Echo received from server: [quit]
-------------------------------------
-```
-
----
-
-## Part 2 - Java Networking with Netty
-
----
-
-## 01. Introduction to Netty
-
-Netty is an advanced framework for creating high-performance network applications.
-
-**Netty's Core Components**
-
-**_1. Channels_**
-
-A Channel represents an open connection to an entity such as a hardware device, a file, a network socket, or a program
-component that is capable of performing one or more distinct I/O operations, for example reading or writing.
-
-Think of a Channel as a vehicle for incoming (inbound) and outgoing (outbound) data.
-
-It can be open or closed, connected or disconnected.
-
-**_2. Callbacks_**
-
-A Callback is a function that is passed as an argument to another function and is intended to be executed after some
-operation has been completed.
-
-In Netty, callbacks are used to handle events such as the completion of an I/O operation or the occurrence of an
-exception.
-
-When a callback is triggered, the event can be handled by an implementation of the interface `ChannelHandler`.
-
-**_3. Futures_**
-
-A Future represents the result of an asynchronous operation.
-
-It provides methods to check if the operation is complete, to wait for its completion, and to retrieve the result of the
-operation.
-
-In Netty, Futures are used to handle the result of asynchronous I/O operations.
-
-`ChannelFuture` provides methods that allow us to register one or more `ChannelFutureListener` instances.
-
-The listener’s callback method, `operationComplete()`, is called when the operation has completed.
-
-The listener can then determine whether the operation completed successfully or with an error.
-
-If the latter, we can retrieve the `Throwable` that was produced.
-
-In short, the notification mechanism provided by the `ChannelFutureListener` eliminates the need for manually checking
-operation completion.
-
-Each of Netty’s outbound I/O operations returns a `ChannelFuture`; that is, none of them block.
-
-**_4. Events and handlers_**
-
-Netty uses distinct events to notify us about changes of state or the status of operations.
-
-This allows us to trigger the appropriate action based on the event that has occurred.
-
-Such actions might include:
-
-- Logging
-- Data transformation
-- Flow-control
-- Application logic
-
-Events that may be triggered by **inbound** data or an associated change of state include:
-
-- Active or inactive connections
-- Data reads
-- User events
-- Error events
-
-An **outbound** event is the result of an operation that will trigger an action in the future, which may be:
-
-- Opening or closing a connection to a remote peer
-- Writing or flushing data to a socket
-
-Every event can be dispatched to a user-implemented method of a handler class.
-
-**Summary**
-
-Netty’s asynchronous programming model is built on the concepts of **Futures** and **callbacks**, with the dispatching
-of events to handler methods happening at a deeper level.
-
-Taken together, these elements provide a processing environment that allows the logic of our application to evolve
-independently of any concerns with network operations.
-
-This is a key goal of Netty’s design approach.
-
-Under the covers, an `EventLoop` is assigned to each `Channel` to handle all of the events, including:
-
-- Registration of interesting events
-- Dispatching events to ChannelHandlers
-- Scheduling further actions
-
-The `EventLoop` itself is driven by only **one thread** that handles all of the I/O events for one `Channel` and does
-not change during the lifetime of the `EventLoop`.
-
-This simple and powerful design eliminates any concern we might have about synchronization in our `ChannelHandlers`, so
-we can focus on providing the right logic to be executed when there is interesting data to process.
-
----
-
-## 02. Project Setup
-
-- [JDK 23 download](https://www.oracle.com/java/technologies/javase/jdk23-archive-downloads.html)
-- [Maven download](https://maven.apache.org/download.cgi)
-- [IntelliJ IDEA download](https://www.jetbrains.com/idea/download/#section=windows)
-- Set `JAVA_HOME`, `M2_HOME`, `MAVEN_HOME` system variables and set in PATH
-
-As this is a maven project, the setup `pom.xml` is provided in the project root.
-
-The only dependency we need to add is Netty v4.2.17 as:
-
-```xml
-
-<dependency>
-    <groupId>io.netty</groupId>
-    <artifactId>netty-all</artifactId>
-    <version>4.2.17.Final</version>
-</dependency>
-```
-
----
-
-## 03. Hello Netty - first program
-
-[Echo Protocol](https://datatracker.ietf.org/doc/html/rfc862)
-
-We will implement our first client/server application which is an **Echo server**, using Netty.
-
-After the client establishes a connection, it sends one or more messages to the server, which in turn echoes each
-message to the client.
-
-**_Writing the Echo server_**
-
-All Netty servers require the following:
-
-- **At least one ChannelHandler** — This component implements the server’s processing of data received from the client —
-  its business logic.
-- **Bootstrapping** — This is the startup code that configures the server. At a minimum, it binds the server to the port
-  on which it will listen for connection requests.
-
-Because our Echo server will respond to incoming messages, it will need to implement interface `ChannelInboundHandler`,
-which defines methods for acting on **inbound events**.
-
-This simple application will require only a few of these methods, so it will be sufficient to subclass
-`ChannelInboundHandlerAdapter`, which provides a default implementation of `ChannelInboundHandler`.
-
-The following methods interest us:
-
-- `channelRead()` — Called for each incoming message
-- `channelReadComplete()` — Notifies the handler that the last call made to `channelRead()` was the last message in the
-  current batch
-- `exceptionCaught()` — Called if an exception is thrown during the read operation
-
-The Echo server’s `ChannelHandler` implementation is `EchoServerHandler`.
-
-Key points:
-
-- `ChannelHandlers` are invoked for different types of events.
-- Applications implement or extend `ChannelHandlers` to hook into the event lifecycle and provide custom application
-  logic.
-- Architecturally, `ChannelHandlers` help to keep our business logic decoupled from networking code. This simplifies
-  development as the code evolves in response to changing requirements.
-
-**_Bootstrapping the server_**
-
-Bootstrapping of the server involves the following:
-
-- Bind to the port on which the server will listen for and accept incoming connection requests
-- Configure Channels to notify an `EchoServerHandler` instance about inbound messages
-
-`EchoServer` class is used for bootstrapping the server.
-
-**Summary**
-
-Primary code components of the server:
-
-- The `EchoServerHandler` implements the business logic.
-- The `EchoServer.main()` method bootstraps the server.
-
-The following steps are required in bootstrapping:
-
-- Create a `ServerBootstrap` instance to bootstrap and bind the server.
-- Create and assign an `NioEventLoopGroup` instance to handle event processing, such as accepting new connections and
-  reading/writing data.
-- Specify the local `InetSocketAddress` to which the server binds.
-- Initialize each new `Channel` with an `EchoServerHandler` instance.
-- Call `ServerBootstrap.bind()` to bind the server.
-
-At this point the server is initialized and ready to be used.
-
----
-
-**_Writing an Echo client_**
-
-The Echo client will:
-
-1. Connect to the server
-2. Send one or more messages
-3. For each message, wait for and receive the same message back from the server
-4. Close the connection
-
-Writing the client involves the same two main code areas we saw in the server: **business logic** and **bootstrapping**.
-
-The client will have a `ChannelInboundHandler` to process the data.
-
-This requires overriding the following methods:
-
-- `channelActive()` — Called after the connection to the server is established
-- `channelRead0()` — Called when a message is received from the server
-- `exceptionCaught()` — Called if an exception is raised during processing
-
-Class `EchoClientHandler` implements the business logic for the client.
-
-**_Bootstrapping the client_**
-
-Bootstrapping a client is similar to bootstrapping a server, with the difference that instead of binding to a listening
-port the client uses host and port parameters to connect to a remote address, here that of the Echo server.
-
-Class `EchoClient` implements the bootstrapping of the client.
-
-**Summary**
-
-- A `Bootstrap` instance is created to initialize the client.
-- An `NioEventLoopGroup` instance is assigned to handle the event processing, which includes creating new connections
-  and processing inbound and outbound data.
-- An `InetSocketAddress` is created for the connection to the server.
-- An `EchoClientHandler` will be installed in the pipeline when the connection is established.
-- After everything is set up, `Bootstrap.connect()` is called to connect to the remote peer.
-
----
-
-## 04. Netty components and design
-
-From a high-level perspective, Netty addresses two corresponding areas of concern:
-
-1. Its asynchronous and event-driven implementation, built on Java NIO, guarantees maximum application performance and
-   scalability under heavy load.
-2. Netty embodies a set of design patterns that decouple application logic from the network layer, simplifying
-   development while maximizing the testability, modularity, and reusability of code.
-
-`Channel`, `EventLoop`, and `ChannelFuture` classes which, taken together, can be thought of as representing Netty’s
-networking abstraction:
-
-- `Channel` — Sockets
-- `EventLoop` — Control flow, multithreading, concurrency
-- `ChannelFuture` — Asynchronous notification
-
-### Interface Channel
-
-Basic I/O operations (`bind()`, `connect()`, `read()`, and `write()`) depend on primitives supplied by the underlying
-network transport.
-
-In Java-based networking, the fundamental construct is class `Socket`.
-
-Netty’s `Channel` interface provides an API that greatly reduces the complexity of working directly with `Socket`.
-
-Additionally, `Channel` is the root of an extensive class hierarchy having many predefined, specialized implementations,
-of which the following is a short list:
-
-- `EmbeddedChannel`
-- `LocalServerChannel`
-- `NioDatagramChannel`
-- `NioSctpChannel`
-- `NioSocketChannel`
-
-### Interface EventLoop
-
-The `EventLoop` defines Netty’s core abstraction for handling events that occur during the lifetime of a connection.
-
-These relationships are:
-
-- An `EventLoopGroup` contains one or more `EventLoop`.
-- An `EventLoop` is bound to a single `Thread` for its lifetime.
-- All I/O events processed by an `EventLoop` are handled on its dedicated `Thread`.
-- A `Channel` is registered for its lifetime with a single `EventLoop`.
-- A single `EventLoop` may be assigned to one or more `Channel`.
-
-Note that this design, in which the I/O for a given `Channel` is executed by the same `Thread`, virtually eliminates the
-need for synchronization.
-
-### Interface ChannelFuture
-
-All I/O operations in Netty are **asynchronous**.
-
-Because an operation may not return immediately, we need a way to determine its result at a later time.
-
-For this purpose, Netty provides `ChannelFuture`, whose `addListener()` method registers a `ChannelFutureListener` to be
-notified when an operation has completed (whether or not successfully).
-
-Think of a `ChannelFuture` as a placeholder for the result of an operation that’s to be executed in the future.
-
-When exactly it will be executed may depend on several factors and thus be impossible to predict with precision, but it
-is certain that it will be executed.
-
-Furthermore, all operations belonging to the same `Channel` are guaranteed to be executed in the order in which they
-were invoked.
-
-### Interface ChannelHandler
-
-From the application developer’s standpoint, the primary component of Netty is the `ChannelHandler`, which serves as the
-container for all application logic that applies to handling inbound and outbound data.
-
-`ChannelHandler` methods are triggered by network events, this means it can be dedicated to almost any kind of action,
-such as converting data from one format to another or handling exceptions thrown during processing.
-
-For example, `ChannelInboundHandler` is a subinterface we’ll implement frequently.
-
-This type receives **inbound events** and data to be handled by our application’s business logic.
-
-We can also flush data from a `ChannelInboundHandler` when we’re sending a response to a connected client.
-
-The business logic of our application will often reside in one or more `ChannelInboundHandler`.
-
-### Interface ChannelPipeline
-
-A `ChannelPipeline` provides a container for a chain of `ChannelHandler`s and defines an API for propagating the flow of
-inbound and outbound events along the chain.
-
-When a `Channel` is created, it is automatically assigned its own `ChannelPipeline`.
-
-`ChannelHandler`s are installed in the `ChannelPipeline` as follows:
-
-- A `ChannelInitializer` implementation is registered with a `ServerBootstrap`.
-- When `ChannelInitializer.initChannel()` is called, the `ChannelInitializer` installs a custom set of `ChannelHandler`s
-  in the pipeline.
-- The `ChannelInitializer` removes itself from the `ChannelPipeline`.
-
-The movement of an event through the pipeline is the work of the `ChannelHandler`s that have been installed during the
-initialization, or bootstrapping phase of the application.
-
-These objects receive events, execute the processing logic for which they have been implemented, and pass the data to
-the next handler in the chain.
-
-The order in which they are executed is determined by the order in which they were added.
-
-// TODO
-
----
-
-## 05. Transports
-
----
-
-## 06. ByteBuf
-
----
-
-## 07. ChannelHandler and ChannelPipeline
-
----
-
-## 08. EventLoop and threading model
-
----
-
-## 09. Bootstrapping
-
----
-
-## 10. The codec framework
-
----
-
-## 11. Provided ChannelHandlers and codecs
-
----
-
-## 12. WebSocket
-
----
-
-## 13. Broadcasting events with UDP
-
----
