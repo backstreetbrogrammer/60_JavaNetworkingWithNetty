@@ -46,20 +46,23 @@ Tools used:
 
 ## 01. Introduction to Networking
 
-A communication protocol is a system of rules that allows two or more entities of a communications system to transmit
-information via any variation of a physical quantity.
+Computer networking is the practice of connecting computers, servers, and other digital devices so they can share data,
+files, and hardware resources.
 
-The protocol defines the rules, syntax, semantics, and synchronization of communication and possible error recovery
-methods. Protocols may be implemented by hardware, software, or a combination of both.
+**Key Building Blocks**
 
-The information exchanged between devices through a network or other media is governed by rules and conventions that can
-be set out in communication protocol specifications.
+- **Nodes**: The connected devices, like laptops, phones, printers, and smart home gadgets.
+- **Links**: The physical wires (like Ethernet cables or fiber optics) or wireless signals (like Wi-Fi) that join the
+  nodes together.
+- **Hardware**: Devices like **Routers** that direct data between different networks, and **switches** that link devices
+  within the same network.
+- **Protocols**: The shared rules that allow different machines to send and receive information accurately.
 
-These specifications, define the nature of communication, the actual data exchanged and any state-dependent behaviors.
+**Common Types of Networks**
 
-In digital computing systems, the rules can be expressed by algorithms and data structures.
-
-**Protocols** are to **communication** what **algorithms** or programming languages are to **computations**.
+- **LAN (Local Area Network)**: Connects devices in a small space, such as a single home, school, or office.
+- **WAN (Wide Area Network)**: Covers large distances across countries; the **internet** is the biggest WAN.
+- **WLAN (Wireless Local Area Network)**: A LAN that uses Wi-Fi instead of physical cables.
 
 To implement a **networking protocol**, the protocol software modules are interfaced with a framework implemented on the
 machine's operating system. This framework implements the networking functionality of the operating system.
@@ -329,7 +332,7 @@ handled:
 
 ![HTTP2_vs_HTTP3](HTTP2_vs_HTTP3.PNG)
 
-### Question 1: What is HTTPS and how is it different from HTTP?
+### What is HTTPS and how is it different from HTTP?
 
 ![HTTPS](HTTPS.PNG)
 
@@ -361,6 +364,8 @@ We will also use some **custom header keys** in both HTTP **Request** and HTTP *
 Complete code for our HTTP server:
 
 ```java
+package com.backstreetbrogrammer.http.httpserver;
+
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
@@ -385,7 +390,6 @@ public class GuidemyWebServer {
     private static final String CUSTOM_HEADER_RESPONSE_KEY = "Rishi-Debug-Info";
 
     private final int port;
-    private HttpServer server;
 
     public GuidemyWebServer(final int port) {
         this.port = port;
@@ -404,6 +408,7 @@ public class GuidemyWebServer {
     }
 
     public void startServer() {
+        final HttpServer server;
         try {
             server = HttpServer.create(new InetSocketAddress(port), 0);
         } catch (final IOException e) {
@@ -550,20 +555,22 @@ Output:
 
 Java 11 supports HTTP client creation. It supports both HTTP 1.1 and HTTP 2.
 
-Here is our `GuidemyWebClient` class:
+Here is our `MyWebClient` class:
 
 ```java
+package com.backstreetbrogrammer.part1.http.httpclient;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.CompletableFuture;
 
-public class GuidemyWebClient {
+public class MyWebClient {
 
     private final HttpClient client;
 
-    public GuidemyWebClient() {
+    public MyWebClient() {
         this.client = HttpClient.newBuilder()
                                 .version(HttpClient.Version.HTTP_1_1)
                                 .build();
@@ -578,7 +585,6 @@ public class GuidemyWebClient {
         return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                      .thenApply(HttpResponse::body);
     }
-
 }
 ```
 
@@ -588,6 +594,8 @@ Client is sending the HTTP POST request method **asynchronously** to the server 
 Let's create a helper program to collect all the client requests and get all the results.
 
 ```java
+package com.backstreetbrogrammer.part1.http.httpclient;
+
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -595,10 +603,10 @@ import java.util.stream.Stream;
 
 public class Accumulator {
 
-    private final GuidemyWebClient webClient;
+    private final MyWebClient webClient;
 
     public Accumulator() {
-        this.webClient = new GuidemyWebClient();
+        this.webClient = new MyWebClient();
     }
 
     public List<String> sendTasksToWorkers(final List<String> workersAddresses, final List<String> tasks) {
@@ -619,7 +627,7 @@ public class Accumulator {
 }
 ```
 
-For the demo servers run, we will run two instances of `GuidemyWebServer` running on ports `8081` and `8082`.
+For the demo servers run, we will run two instances of `MyWebServer` running on ports `8081` and `8082`.
 
 ![GuidemyWebServer8081](GuidemyWebServer8081.PNG)
 
@@ -628,6 +636,8 @@ For the demo servers run, we will run two instances of `GuidemyWebServer` runnin
 For the demo client run, we will use this `Main` class:
 
 ```java
+package com.backstreetbrogrammer.part1.http.httpclient;
+
 import java.util.List;
 
 public class Main {
